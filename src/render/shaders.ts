@@ -6,8 +6,11 @@ export const VERT = `#version 300 es
 out vec2 vUV;
 void main() {
   vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-  vUV = p;
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+  // Clip space counts y upward; the grid counts it downward, and the texture
+  // was uploaded in grid order. Flip v here or the whole world renders upside
+  // down and sand appears to fall towards the ceiling.
+  vUV = vec2(p.x, 1.0 - p.y);
 }`
 
 export const FRAG = `#version 300 es
