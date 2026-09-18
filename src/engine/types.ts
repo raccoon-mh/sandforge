@@ -69,11 +69,21 @@ export const B = {
   EXPLODE: 1 << 24,
   /** Dissolves other materials on contact, weighted by their hardness. */
   CORRODE: 1 << 25,
+  /** Logic gate: reads charge off adjacent P-type, drives adjacent N-type. */
+  GATE: 1 << 26,
+  /** Pulls loose ferrous material towards itself. */
+  MAGNET: 1 << 27,
+  /** Holds an incoming charge for `life` ticks before passing it on. */
+  HOLD: 1 << 28,
 } as const
 
+/** Which function a `B.GATE` material computes. */
+export const Gate = { None: 0, And: 1, Or: 2, Xor: 3, Not: 4 } as const
+export type Gate = (typeof Gate)[keyof typeof Gate]
+
 export type Category =
-  | 'powder' | 'liquid' | 'gas' | 'solid'
-  | 'electronic' | 'energy' | 'nuclear' | 'life' | 'tool'
+  | 'powder' | 'liquid' | 'gas' | 'solid' | 'metal'
+  | 'electronic' | 'explosive' | 'energy' | 'nuclear' | 'life' | 'tool'
 
 export interface Reaction {
   /** Material id this one reacts with. */
@@ -127,6 +137,9 @@ export interface MatDef {
   burnInto?: string
   /** Kelvin released per burning tick. */
   burnHeat?: number
+  /** Flame temperature ceiling (K). Burning heats towards this and stops.
+   *  Defaults to `burnT + burnHeat * 2`, capped at 4000. */
+  flameT?: number
   /** Electrical conductivity 0..1. */
   cond?: number
   /** Resistance to acid and erosion, 0..1. 1 = immune. */
@@ -139,6 +152,8 @@ export interface MatDef {
   dies?: string
   /** Behaviour bits (see `B`). */
   behav?: number
+  /** For `B.GATE` materials, the function it computes. */
+  gate?: Gate
   /** Emissive strength 0..1 — bloom and light contribution. */
   glow?: number
   /** One line for the codex. */

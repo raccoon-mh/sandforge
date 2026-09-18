@@ -18,7 +18,8 @@ precision highp float;
 precision highp sampler2DArray;
 
 uniform sampler2DArray uCells;    // R: material, G: tint+flags, BA: temperature
-uniform sampler2D uPalette;       // x: material index, rgb: colour, a: glow
+uniform sampler2D uPalette;       // row 0: rgb colour + a glow; row 1: r = flat look
+uniform vec2 uTexel;              // one cell, in texture coordinates
 uniform sampler2DArray uField;    // R: pressure, G: |velocity|
 uniform int uMode;                // 0 material 1 thermal 2 pressure 3 circuit
 uniform int uView;                // 0 slice 1 stack 2 tilt
@@ -55,7 +56,11 @@ vec3 pressureMap(float p) {
   return u < 0.0 ? mix(mid, cold, -u) : mix(mid, hot, u);
 }
 
-vec4 shadeLayer(vec2 uv, int layer) {
+int matAt(vec2 uv, int layer) {
+  return int(texture(uCells, vec3(uv, float(layer))).r * 255.0 + 0.5);
+}
+
+vec4 shadeLayer(vec2 uv, int layer, bool detail) {
   vec4 c = texture(uCells, vec3(uv, float(layer)));
   int mat = int(c.r * 255.0 + 0.5);
   if (mat == 0) return vec4(0.0);
@@ -66,8 +71,26 @@ vec4 shadeLayer(vec2 uv, int layer) {
   bool charged = (flags & 2) != 0;
 
   vec4 pal = texelFetch(uPalette, ivec2(mat, 0), 0);
-  vec3 col = pal.rgb * (0.86 + jitter * 0.28);
+  float isFlat = texelFetch(uPalette, ivec2(mat, 1), 0).r;   // 'flat' is a GLSL keyword
   float glow = pal.a;
+
+  // Manufactured solids are drawn as surfaces with a bevelled edge; natural
+  // material keeps its grain. Give a copper bus the same speckle as a sand
+  // pile and a circuit board reads as a smear of powder.
+  vec3 col;
+  if (isFlat > 0.5 && detail) {
+    col = pal.rgb;
+    float lit = 0.0;
+    if (matAt(uv + vec2(0.0, -uTexel.y), layer) != mat) lit += 0.17;
+    if (matAt(uv + vec2(-uTexel.x, 0.0), layer) != mat) lit += 0.10;
+    if (matAt(uv + vec2(0.0, uTexel.y), layer) != mat) lit -= 0.22;
+    if (matAt(uv + vec2(uTexel.x, 0.0), layer) != mat) lit -= 0.13;
+    col *= 1.0 + lit;
+  } else if (isFlat > 0.5) {
+    col = pal.rgb;
+  } else {
+    col = pal.rgb * (0.86 + jitter * 0.28);
+  }
 
   float temp = decodeTemp(c);
   if (temp > 700.0) {
@@ -92,10 +115,10 @@ void main() {
     for (int d = 3; d >= 1; d--) {
       int lo = uLayer - d, hi = uLayer + d;
       float f = 0.13 / float(d);
-      if (lo >= 0) { vec4 s = shadeLayer(vUV, lo); outc = mix(outc, s.rgb, s.a * f); }
-      if (hi < uLayers) { vec4 s = shadeLayer(vUV, hi); outc = mix(outc, s.rgb, s.a * f); }
+      if (lo >= 0) { vec4 s = shadeLayer(vUV, lo, false); outc = mix(outc, s.rgb, s.a * f); }
+      if (hi < uLayers) { vec4 s = shadeLayer(vUV, hi, false); outc = mix(outc, s.rgb, s.a * f); }
     }
-    vec4 s = shadeLayer(vUV, uLayer);
+    vec4 s = shadeLayer(vUV, uLayer, true);
     outc = mix(outc, s.rgb, s.a);
     cov = s.a;
   } else {
@@ -106,7 +129,7 @@ void main() {
       float depth = float(layer) / max(1.0, float(uLayers - 1));
       vec2 uv = vUV + (uView == 2 ? uTilt * (depth - 0.5) : vec2(0.0));
       if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) continue;
-      vec4 s = shadeLayer(uv, layer);
+      vec4 s = shadeLayer(uv, layer, layer == uLayer);
       float shade = mix(0.32, 1.0, 1.0 - depth);
       outc = mix(outc, s.rgb * shade, s.a * (uView == 2 ? 1.0 : 0.72));
       cov = max(cov, s.a);

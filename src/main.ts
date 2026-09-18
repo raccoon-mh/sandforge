@@ -4,14 +4,19 @@ import { PRESETS } from './engine/grid.ts'
 import type { Category } from './engine/types.ts'
 import type { ColourMode, ViewMode } from './render/renderer.ts'
 import type { FromWorker, ToWorker } from './worker/protocol.ts'
+import { SCENES } from './share/scenes.ts'
+import { B } from './engine/types.ts'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
 const CATEGORY_NAMES: Record<Category, string> = {
-  powder: '분말', liquid: '액체', gas: '기체', solid: '고체',
-  electronic: '전자', energy: '에너지', nuclear: '핵', life: '생명', tool: '도구',
+  powder: '분말', liquid: '액체', gas: '기체', solid: '고체', metal: '금속',
+  electronic: '전자', explosive: '폭발물', energy: '에너지', nuclear: '핵', life: '생명', tool: '도구',
 }
-const CATEGORY_ORDER: Category[] = ['powder', 'liquid', 'gas', 'solid', 'electronic', 'energy', 'nuclear', 'life', 'tool']
+const CATEGORY_ORDER: Category[] = [
+  'powder', 'liquid', 'gas', 'solid', 'metal', 'electronic',
+  'explosive', 'energy', 'nuclear', 'life', 'tool',
+]
 const PHASE_NAMES = ['고체', '분말', '액체', '기체', '에너지']
 const SPEEDS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 8]
 
@@ -90,8 +95,18 @@ worker.onmessage = (e: MessageEvent<FromWorker>) => {
       (m.burning ? ' &nbsp;·&nbsp; <b>연소중</b>' : '')
   } else if (m.t === 'saved') {
     downloadSave(m.data)
+  } else if (m.t === 'scene') {
+    layer = m.layer
+    $('layerLabel').textContent = `층 ${layer + 1}/${size.l}`
+    setGroup('modeGroup', 'mode', m.mode)
+    setGroup('viewGroup', 'view', 'slice')
+    running = true
+    $('playBtn').textContent = '⏸'
+    showHint(m.name, m.hint)
   } else if (m.t === 'error') {
+    console.error('[sandforge]', m.message)
     toast('오류: ' + m.message)
+    $('probe').innerHTML = `<span class="warn">오류: ${m.message.split('\n')[0]}</span>`
   }
 }
 
@@ -129,31 +144,72 @@ function buildPalette(filter = ''): void {
   }
 }
 
+const BEHAVIOUR_NAMES: [number, string][] = [
+  [B.WALL, '파괴 불가'], [B.CLONE, '복제'], [B.VOID, '소멸'], [B.SPARK, '전하'],
+  [B.PHOTON, '직진'], [B.NEUTRON, '핵분열 유발'], [B.HEATER, '발열'], [B.COOLER, '냉각'],
+  [B.GROW, '성장'], [B.INFECT, '전염'], [B.ABSORB, '흡수'], [B.SEMI_N, 'N형'],
+  [B.SEMI_P, 'P형'], [B.BATTERY, '전원'], [B.SWITCH, '스위치'], [B.VIA, '층간 도통'],
+  [B.RADIO, '방사성'], [B.ANTIM, '쌍소멸'], [B.PUMP, '가압'], [B.VENT, '감압'],
+  [B.CLOCK, '주기 발신'], [B.LAMP, '점등'], [B.SENSOR, '감지'], [B.EXPLODE, '폭발'],
+  [B.CORRODE, '부식'], [B.GATE, '논리 게이트'], [B.MAGNET, '자성'], [B.HOLD, '신호 지연'],
+]
+
+const matName = (id: string): string => DEFS[ID_TO_NUM.get(id)!]?.name ?? id
+const sideName = (v: string | null, fallback: string): string =>
+  v === null ? fallback : v === '' ? '소멸' : matName(v)
+
 function showInfo(n: number): void {
   const d = DEFS[n]
   const box = $('matInfo')
   box.hidden = false
+
   const rows: [string, string][] = [
+    ['분류', CATEGORY_NAMES[d.cat]],
     ['상태', PHASE_NAMES[d.phase]],
     ['밀도', d.density >= 1e8 ? '고정' : d.density.toLocaleString()],
   ]
-  if (d.hi !== undefined && d.hiInto) rows.push([`${d.hi}K 이상`, DEFS[ID_TO_NUM.get(d.hiInto)!].name])
-  if (d.lo !== undefined && d.loInto) rows.push([`${d.lo}K 이하`, DEFS[ID_TO_NUM.get(d.loInto)!].name])
-  if (d.burn) rows.push(['발화점', `${d.burnT}K`])
-  if (d.cond) rows.push(['전기전도', `${Math.round(d.cond * 100)}%`])
-  if (d.tK !== undefined) rows.push(['열전도', `${Math.round(d.tK * 100)}%`])
-  if (d.reacts?.length) {
-    for (const r of d.reacts) {
-      const other = DEFS[ID_TO_NUM.get(r.with)!]?.name ?? r.with
-      const a = r.into[0] === null ? d.name : r.into[0] === '' ? '소멸' : DEFS[ID_TO_NUM.get(r.into[0])!].name
-      const b = r.into[1] === null ? other : r.into[1] === '' ? '소멸' : DEFS[ID_TO_NUM.get(r.into[1])!].name
-      rows.push([`+ ${other}`, `→ ${a} + ${b}`])
-    }
+  // Phase changes read as melt/boil or freeze/condense depending on which way
+  // the material is going, which is more useful than a raw threshold.
+  if (d.hi !== undefined && d.hiInto) {
+    const up = DEFS[ID_TO_NUM.get(d.hiInto)!]
+    const verb = d.phase === 0 ? (up.phase === 2 ? '녹는점' : '변화') : d.phase === 2 ? '끓는점' : '변화'
+    rows.push([verb, `${d.hi}K → ${up.name}`])
   }
+  if (d.lo !== undefined && d.loInto) {
+    const dn = DEFS[ID_TO_NUM.get(d.loInto)!]
+    const verb = d.phase === 2 ? '어는점' : d.phase === 3 ? '응축' : '변화'
+    rows.push([verb, `${d.lo}K → ${dn.name}`])
+  }
+  if (d.burn) {
+    rows.push(['발화점', `${d.burnT}K`])
+    rows.push(['연소 후', d.burnInto === '' || d.burnInto === undefined ? '소멸' : matName(d.burnInto)])
+    if (d.burnHeat) rows.push(['연소 열', `+${d.burnHeat}K`])
+  }
+  if (d.cond) rows.push(['전기전도', `${Math.round(d.cond * 100)}%`])
+  rows.push(['열전도', `${Math.round((d.tK ?? 0.1) * 100)}%`])
+  if (d.hcap !== undefined && d.hcap !== 1) rows.push(['열용량', `${d.hcap}×`])
+  rows.push(['경도', `${Math.round((d.hard ?? 0.3) * 100)}%`])
+  if (d.disp) rows.push(['확산', `${d.disp}칸/틱`])
+  if (d.slide) rows.push(['안식각', `${Math.round(d.slide * 100)}%`])
+  if (d.t0 !== undefined && d.t0 !== 295) rows.push(['생성 온도', `${d.t0}K`])
+
+  const bits = BEHAVIOUR_NAMES.filter(([bit]) => (d.behav ?? 0) & bit).map(([, name]) => name)
+  if (bits.length) rows.push(['특성', bits.join(' · ')])
+
+  const reactions = (d.reacts ?? []).map(r => {
+    const other = matName(r.with)
+    const a = sideName(r.into[0], d.name)
+    const b = sideName(r.into[1], other)
+    const cond = r.minT !== undefined ? ` (${r.minT}K 이상)` : r.maxT !== undefined ? ` (${r.maxT}K 이하)` : ''
+    const heat = r.heat ? (r.heat > 0 ? ` +${r.heat}K` : ` ${r.heat}K`) : ''
+    return `<li><span class="rx-in">${d.name} + ${other}</span><span class="rx-out">→ ${a} + ${b}${cond}${heat}</span></li>`
+  })
+
   box.innerHTML =
-    `<h4>${d.name} <span style="color:#6f7684;font-weight:400">${d.id}</span></h4>` +
-    (d.desc ? `<div>${d.desc}</div>` : '') +
-    '<dl>' + rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') + '</dl>'
+    `<h4>${d.name} <span class="code">${d.id}</span></h4>` +
+    (d.desc ? `<div class="blurb">${d.desc}</div>` : '') +
+    '<dl>' + rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') + '</dl>' +
+    (reactions.length ? `<div class="rx-head">반응 ${reactions.length}가지</div><ul class="rx">${reactions.join('')}</ul>` : '')
 }
 
 function renderRecent(): void {
@@ -310,6 +366,31 @@ $<HTMLInputElement>('fileInput').onchange = async ev => {
   toast(`${file.name} 을(를) 불러왔습니다`)
 }
 
+// --- examples ----------------------------------------------------------------
+
+function buildExamples(): void {
+  const list = $('exList')
+  list.innerHTML = ''
+  for (const sc of SCENES) {
+    const b = document.createElement('button')
+    b.className = 'ex'
+    b.innerHTML = `<b>${sc.name}</b><span>${sc.hint}</span>`
+    b.onclick = () => { send({ t: 'scene', id: sc.id }); $('examples').hidden = true }
+    list.append(b)
+  }
+}
+
+function showHint(name: string, hint: string): void {
+  const el = $('hint')
+  el.innerHTML = `<b>${name}</b> — ${hint}<button title="닫기">✕</button>`
+  el.hidden = false
+  el.querySelector('button')!.onclick = () => { el.hidden = true }
+}
+
+$('examplesBtn').onclick = () => { $('examples').hidden = false }
+$('exClose').onclick = () => { $('examples').hidden = true }
+$('examples').onclick = ev => { if (ev.target === $('examples')) $('examples').hidden = true }
+
 let toastTimer = 0
 function toast(msg: string): void {
   const el = $('toast')
@@ -331,6 +412,8 @@ addEventListener('keydown', (ev: KeyboardEvent) => {
   else if (k === 'q' || k === 'Q') setLayer(layer - 1)
   else if (k === 'e' || k === 'E') setLayer(layer + 1)
   else if (k >= '1' && k <= '8') { const n = recent[+k - 1]; if (n !== undefined) pick(n) }
+  else if (k === 'x' || k === 'X') $('examplesBtn').click()
+  else if (k === 'Escape') { $('examples').hidden = true }
   else if (k === 'v' || k === 'V') {
     const order: ViewMode[] = ['slice', 'stack', 'tilt']
     const cur = document.querySelector<HTMLElement>('#viewGroup .on')!.dataset.view as ViewMode
@@ -355,6 +438,7 @@ ro.observe($('stage'))
 // --- go ----------------------------------------------------------------------
 
 computeViewport()
+buildExamples()
 buildPalette()
 renderRecent()
 setBrush(brush)

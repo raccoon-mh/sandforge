@@ -68,3 +68,26 @@ for (const [a, b, label] of [['PSCN', 'NSCN', '정방향'], ['NSCN', 'PSCN', '�
   for (let i = 0; i < 60; i++) { s2.step(); if (q.chg[q.idx(17, 3, 0)] > 0) lit = true }
   console.log(`  ${label} (${a}->${b}): 램프 ${lit ? '켜짐' : '꺼짐'}`)
 }
+
+console.log('\n=== 6. 논리 게이트 진리표 ===')
+for (const [gate, label, want] of [['ANDG', 'AND', '0001'], ['ORGT', 'OR', '0111'],
+                                   ['XORG', 'XOR', '0110'], ['NOTG', 'NOT', '1000']]) {
+  const rows = []
+  for (const [a, b] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const s2 = new Sim({ w: 24, h: 12, l: 1 }); const q = s2.grid
+    q.set(q.idx(6, 4, 0), M('PSCN'), 6, 4, 0); q.set(q.idx(6, 6, 0), M('PSCN'), 6, 6, 0)
+    q.set(q.idx(7, 5, 0), M(gate), 7, 5, 0); q.set(q.idx(8, 5, 0), M('NSCN'), 8, 5, 0)
+    for (let x = 9; x < 18; x++) q.set(q.idx(x, 5, 0), M('WIRE'), x, 5, 0)
+    q.set(q.idx(18, 5, 0), M('LAMP'), 18, 5, 0)
+    let lit = 0
+    for (let i = 0; i < 200; i++) {
+      if (a && i % 5 === 0) s2.paint(6, 4, 0, M('SPRK'), 0)
+      if (b && i % 5 === 0) s2.paint(6, 6, 0, M('SPRK'), 0)
+      s2.step()
+      if (i > 50 && q.chg[q.idx(18, 5, 0)] > 0) lit++
+    }
+    rows.push(lit > 10 ? 1 : 0)
+  }
+  const got = rows.join('')
+  console.log(`  ${label.padEnd(4)} 00/10/01/11 = ${got}  ${got === want ? 'OK' : '기대 ' + want}`)
+}

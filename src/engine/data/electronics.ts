@@ -31,7 +31,7 @@ export const ELECTRONICS: MatDef[] = [
     density: 3000, tK: 0.4, hcap: 1, cond: 0.25, hi: 1200, hiInto: 'SMKE', hard: 0.3,
     desc: '전기를 띄엄띄엄 통하고 그만큼 열을 낸다.' },
   { id: 'CAPC', name: '커패시터', cat: 'electronic', color: 0x6a5aa0, cvar: 6, phase: Phase.Solid,
-    density: 3000, tK: 0.3, hcap: 1, cond: 1, life: 24, glow: 0.15, hard: 0.35,
+    density: 3000, tK: 0.3, hcap: 1, cond: 1, behav: B.HOLD, life: 24, glow: 0.15, hard: 0.35,
     desc: '받은 전기를 잠시 담았다 늦게 내보낸다.' },
   { id: 'VIA', name: '비아', cat: 'electronic', color: 0xe0b060, cvar: 6, phase: Phase.Solid,
     density: 8900, tK: 0.8, hcap: 0.4, cond: 1, behav: B.VIA, glow: 0.2, hard: 0.5,

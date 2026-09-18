@@ -2,6 +2,7 @@
 import { Sim } from '../engine/sim.ts'
 import { Renderer, type ColourMode, type ViewMode } from '../render/renderer.ts'
 import { decode, encode } from '../share/save.ts'
+import { buildScene } from '../share/scenes.ts'
 import type { FromWorker, Telemetry, ToWorker } from './protocol.ts'
 
 // The worker owns the grid AND the canvas. Nothing large ever crosses the
@@ -120,6 +121,18 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       case 'clear':
         sim?.reset()
         break
+      case 'scene': {
+        if (!sim) break
+        const scene = buildScene(sim, m.id)
+        if (!scene) { post({ t: 'error', message: `예제 '${m.id}' 가 없습니다` }); break }
+        // A scene knows which layer and which overlay it is meant to be read in.
+        view.layer = scene.layer ?? 0
+        view.mode = scene.mode ?? 'material'
+        view.view = 'slice'
+        running = true
+        post({ t: 'scene', id: scene.id, name: scene.name, hint: scene.hint, layer: view.layer, mode: view.mode })
+        break
+      }
       case 'gravity':
         break
       case 'save': {

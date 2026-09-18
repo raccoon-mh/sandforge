@@ -1,12 +1,12 @@
 import { Grid, AMBIENT, CH, CH_SHIFT, type GridSize } from './grid.ts'
 import { PressureField } from './pressure.ts'
-import { B, Phase } from './types.ts'
+import { B, Gate, Phase } from './types.ts'
 import {
-  EMPTY, N, ID_TO_NUM,
+  EMPTY, ID_TO_NUM,
   matPhase, matDensity, matDisp, matSlide, matTK, matHcap, matLo, matLoInto,
-  matHi, matHiInto, matBurn, matBurnT, matBurnInto, matBurnHeat, matCond, matHard,
-  matLife, matBehav, matDecay, matDies, matReactive, matSelfActive, matIgniter,
-  reactAt, reactLen, reactSelf, reactOther, reactP, reactMinT, reactMaxT, reactHeat,
+  matHi, matHiInto, matBurn, matBurnT, matBurnInto, matBurnHeat, matFlameT, matCond, matHard,
+  matLife, matBehav, matDecay, matDies, matReactive, matSelfActive, matIgniter, matGate,
+  ruleStart, ruleCount, ruleWith, ruleSelf, ruleOther, ruleP, ruleMinT, ruleMaxT, ruleHeat,
 } from './materials.ts'
 
 function M(id: string): number {
@@ -19,6 +19,21 @@ const FIRE = M('FIRE'), SMKE = M('SMKE'), PLSM = M('PLSM')
 const WATR = M('WATR'), STEM = M('STEM'), OXYG = M('OXYG'), NEUT = M('NEUT')
 const LAVA = M('LAVA'), SPRK = M('SPRK'), GLAS = M('GLAS'), FILT = M('FILT')
 const URAN = M('URAN'), PLUT = M('PLUT'), DEUT = M('DEUT'), MUD = M('MUD')
+const THOR = M('THOR'), TRIT = M('TRIT'), IRND = M('IRND'), BRMT = M('BRMT')
+
+/**
+ * How many ticks a cell holds a charge before passing it on. A delay line or
+ * capacitor sits on it deliberately; P-type holds so that a gate reading it
+ * sees a level rather than a one-tick blip; everything else passes it on at
+ * the next tick. Painting a spark by hand goes through here too, or a hand-fed
+ * input would behave differently from a wired one.
+ */
+function chargeLevel(mat: number): number {
+  const bh = matBehav[mat]
+  if (bh & B.HOLD) return Math.max(2, matLife[mat])
+  if (bh & (B.LAMP | B.SEMI_P)) return 10
+  return 1
+}
 
 /** 8-neighbourhood, clockwise from up. Index doubles as the direction byte. */
 const DX = new Int8Array([0, 1, 1, 1, 0, -1, -1, -1])
@@ -136,9 +151,11 @@ export class Sim {
         if (replaceOnly && cur === EMPTY) continue
         if (mat === SPRK) {
           // A spark is not a material you can stack — it is a charge on a conductor.
-          if (matCond[cur] > 0 && g.chg[i] === 0 && g.cool[i] === 0) {
-            g.chg[i] = 1
-            this.sparkList.push(i)
+          if (matCond[cur] > 0 && g.cool[i] === 0) {
+            const held = g.chg[i] !== 0
+            if (held && (matBehav[cur] & B.SEMI_P) === 0) continue
+            g.chg[i] = chargeLevel(cur)
+            if (!held) this.sparkList.push(i)
             g.wake(x, y, z)
           }
           continue
@@ -293,7 +310,14 @@ export class Sim {
   private burnStep(i: number, x: number, y: number, z: number, t: number): boolean {
     const g = this.grid
     const left = g.burning[i] - 1
-    g.temp[i] += matBurnHeat[t] * 0.06 / matHcap[t]
+    // Burning heats towards a flame temperature and stops there. Adding the
+    // release every tick without a ceiling took thermite past 14,000K, which
+    // is hotter than the surface of the sun by a factor of two.
+    const ceiling = matFlameT[t]
+    const cur = g.temp[i]
+    if (cur < ceiling) {
+      g.temp[i] = Math.min(ceiling, cur + matBurnHeat[t] * 0.06 / matHcap[t])
+    }
     g.wakeThermal(x, y, z)
     // Spread to a neighbour: flame into open air, and straight into anything
     // flammable it is touching. Solid timber has no empty neighbours to flame
@@ -356,7 +380,7 @@ export class Sim {
       const nx = x + DX[d], ny = y + DY[d]
       if (g.inBounds(nx, ny)) {
         const j = g.idx(nx, ny, z)
-        if (this.applyRules(t * N + g.type[j], i, j, x, y, nx, ny, z)) return true
+        if (this.applyRules(t, g.type[j], i, j, x, y, nx, ny, z)) return true
       }
     }
 
@@ -390,18 +414,19 @@ export class Sim {
     return t
   }
 
-  private applyRules(key: number, si: number, oi: number, sx: number, sy: number,
-                     ox: number, oy: number, z: number): boolean {
-    const at = reactAt[key]
-    if (at < 0) return false
+  private applyRules(self: number, other: number, si: number, oi: number,
+                     sx: number, sy: number, ox: number, oy: number, z: number): boolean {
+    const n = ruleCount[self]
+    if (n === 0) return false
     const g = this.grid
-    const n = reactLen[key]
+    const at = ruleStart[self]
     const temp = (g.temp[si] + g.temp[oi]) * 0.5
     for (let k = at; k < at + n; k++) {
-      if (temp < reactMinT[k] || temp > reactMaxT[k]) continue
-      if (this.rnd() >= reactP[k]) continue
-      const heat = reactHeat[k]
-      const ns = reactSelf[k], no = reactOther[k]
+      if (ruleWith[k] !== other) continue
+      if (temp < ruleMinT[k] || temp > ruleMaxT[k]) continue
+      if (this.rnd() >= ruleP[k]) continue
+      const heat = ruleHeat[k]
+      const ns = ruleSelf[k], no = ruleOther[k]
       if (no >= 0) { g.set(oi, no, ox, oy, z, this.stable(no, g.temp[oi] + heat)) }
       else { g.temp[oi] += heat; g.wake(ox, oy, z) }
       if (ns >= 0) {
@@ -422,8 +447,11 @@ export class Sim {
   private behaviour(i: number, x: number, y: number, z: number, t: number, bh: number): boolean {
     const g = this.grid
 
-    if (bh & B.HEATER) { this.radiate(x, y, z, g.life[i] || 40); return false }
-    if (bh & B.COOLER) { this.radiate(x, y, z, -(g.life[i] || 40)); return false }
+    // A heater holds its neighbours at a temperature; it does not pour heat in
+    // forever. The earlier version added a fixed number of kelvin per tick and
+    // a heat exchanger left running reached 20,000K.
+    if (bh & B.HEATER) { this.driveTemp(x, y, z, g.life[i] || 1200); return false }
+    if (bh & B.COOLER) { this.driveTemp(x, y, z, g.life[i] || 77); return false }
 
     if (bh & B.VOID) {
       for (let d = 0; d < 8; d++) {
@@ -483,8 +511,8 @@ export class Sim {
         if (!g.inBounds(nx, ny)) continue
         const k = g.idx(nx, ny, z)
         const o = g.type[k]
-        if (o === URAN || o === PLUT) {
-          g.set(k, LAVA, nx, ny, z, g.temp[k] + (o === PLUT ? 4200 : 2600))
+        if (o === URAN || o === PLUT || o === THOR) {
+          g.set(k, LAVA, nx, ny, z, g.temp[k] + (o === PLUT ? 4200 : o === THOR ? 1500 : 2600))
           g.wakeThermal(nx, ny, z)
           this.emit(nx, ny, z, NEUT, this.rndInt(8))
           this.emit(nx, ny, z, NEUT, this.rndInt(8))
@@ -492,7 +520,7 @@ export class Sim {
           g.set(i, EMPTY, x, y, z)
           return true
         }
-        if (o === DEUT && g.temp[k] > 3000) {
+        if ((o === DEUT || o === TRIT) && g.temp[k] > (o === TRIT ? 2000 : 3000)) {
           g.set(k, PLSM, nx, ny, z, g.temp[k] + 6000)
           this.emit(nx, ny, z, NEUT, this.rndInt(8))
           this.pf.add(nx, ny, z, 30)
@@ -595,7 +623,8 @@ export class Sim {
     }
 
     if (bh & B.CLOCK) {
-      const period = Math.max(2, matLife[t])
+      // Per-cell period, so two clocks in one scene can beat against each other.
+      const period = Math.max(2, g.life[i] || matLife[t])
       if (this.tick % period === 0) this.sparkNeighbours(i, x, y, z)
       return false
     }
@@ -609,19 +638,94 @@ export class Sim {
 
     if (bh & B.BATTERY) { this.sparkNeighbours(i, x, y, z); return false }
 
+    if (bh & B.GATE) { this.gate(i, x, y, z, t); return false }
+
+    if (bh & B.MAGNET) { this.magnet(x, y, z); return false }
+
     return false
   }
 
-  private radiate(x: number, y: number, z: number, amount: number): void {
+  /**
+   * A gate reads charge off adjacent P-type and drives adjacent N-type. The
+   * in/out convention is the whole design: without it a gate feeds its own
+   * inputs and every circuit degenerates into noise within a few ticks.
+   */
+  private gate(i: number, x: number, y: number, z: number, t: number): void {
     const g = this.grid
+    let inputs = 0, live = 0
     for (let d = 0; d < 8; d++) {
       const nx = x + DX[d], ny = y + DY[d]
       if (!g.inBounds(nx, ny)) continue
       const j = g.idx(nx, ny, z)
-      g.temp[j] = Math.max(1, g.temp[j] + amount * 0.25)
-      g.wake(nx, ny, z)
+      if ((matBehav[g.type[j]] & B.SEMI_P) === 0) continue
+      inputs++
+      // P-type holds its charge for several ticks (see `charge`), which is what
+      // turns a one-tick spark into something a gate can read as a level.
+      if (g.chg[j] !== 0) live++
     }
-    g.wakeThermal(x, y, z)
+    if (inputs === 0) return
+
+    const op = matGate[t]
+    const out = op === Gate.And ? live >= 2 && live === inputs
+      : op === Gate.Or ? live >= 1
+      : op === Gate.Xor ? live === 1
+      : op === Gate.Not ? live === 0
+      : false
+    if (!out || g.cool[i] !== 0) return
+
+    let drove = false
+    for (let d = 0; d < 8; d++) {
+      const nx = x + DX[d], ny = y + DY[d]
+      if (!g.inBounds(nx, ny)) continue
+      const j = g.idx(nx, ny, z)
+      if ((matBehav[g.type[j]] & B.SEMI_N) === 0) continue
+      if (g.chg[j] !== 0 || g.cool[j] !== 0) continue
+      g.chg[j] = 1
+      this.sparkList.push(j)
+      g.wake(nx, ny, z)
+      drove = true
+    }
+    if (drove) { g.cool[i] = 4; this.coolList.push(i) }
+  }
+
+  /** Drags loose ferrous grains one cell closer, within a short reach. */
+  private magnet(x: number, y: number, z: number): void {
+    const g = this.grid
+    const reach = 3
+    for (let dy = -reach; dy <= reach; dy++) {
+      const ny = y + dy
+      if (ny < 0 || ny >= g.h) continue
+      for (let dx = -reach; dx <= reach; dx++) {
+        if (dx === 0 && dy === 0) continue
+        const nx = x + dx
+        if (nx < 0 || nx >= g.w) continue
+        const j = g.idx(nx, ny, z)
+        const o = g.type[j]
+        if (o !== IRND && o !== BRMT) continue
+        const sx = dx === 0 ? 0 : dx > 0 ? -1 : 1
+        const sy = dy === 0 ? 0 : dy > 0 ? -1 : 1
+        this.tryMove(j, nx, ny, nx + sx, ny + sy, z, o)
+      }
+    }
+  }
+
+  /** Pull the eight neighbours towards a set point. Converges, never diverges. */
+  private driveTemp(x: number, y: number, z: number, target: number): void {
+    const g = this.grid
+    let moved = false
+    for (let d = 0; d < 8; d++) {
+      const nx = x + DX[d], ny = y + DY[d]
+      if (!g.inBounds(nx, ny)) continue
+      const j = g.idx(nx, ny, z)
+      const t = g.temp[j]
+      const dT = (target - t) * 0.12
+      if (dT > -0.05 && dT < 0.05) continue
+      g.temp[j] = Math.max(1, t + dT)
+      g.wake(nx, ny, z)
+      moved = true
+    }
+    g.temp[g.idx(x, y, z)] = target
+    if (moved) g.wakeThermal(x, y, z)
   }
 
   private emit(x: number, y: number, z: number, mat: number, dir: number): void {
@@ -900,7 +1004,10 @@ export class Sim {
 
       if (c > 1) { g.chg[i] = c - 1; next.push(i); continue }
       g.chg[i] = 0
-      g.cool[i] = 5
+      // P-type re-arms almost immediately so a repeating source can hold a
+      // level on it; everything else stays refractory long enough that a spark
+      // does not run straight back the way it came.
+      g.cool[i] = (matBehav[t] & B.SEMI_P) ? 1 : 5
       this.coolList.push(i)
       this.spread(i, x, y, z, next)
     }
@@ -935,6 +1042,10 @@ export class Sim {
     const g = this.grid
     const o = g.type[j]
     const bh = matBehav[o]
+    // A P-type input that is still being driven stays high: top the hold back
+    // up instead of refusing. Without this the level always drains to zero for
+    // a few ticks before it can be re-armed, and a NOT gate blips every cycle.
+    if ((bh & B.SEMI_P) && g.chg[j] !== 0 && g.cool[j] === 0) { g.chg[j] = chargeLevel(o); return }
     if (g.chg[j] !== 0 || g.cool[j] !== 0) return
     if (bh & B.SWITCH) { if (g.life[j] === 0) return }
     else if (matCond[o] <= 0) return
@@ -942,7 +1053,7 @@ export class Sim {
     if ((bh & B.SEMI_N) && !(bhSrc & B.SEMI_P)) return
     if ((bhSrc & B.SEMI_N) && (bh & B.SEMI_P)) return
     if (this.rnd() > matCond[o] + 0.15) return
-    g.chg[j] = (bh & B.LAMP) ? 10 : 1
+    g.chg[j] = chargeLevel(o)
     out.push(j)
     g.wake(nx, ny, nz)
   }

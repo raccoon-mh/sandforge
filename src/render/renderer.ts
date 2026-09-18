@@ -1,5 +1,5 @@
 import type { Sim } from '../engine/sim.ts'
-import { EMPTY, N, matColor, matGlow } from '../engine/materials.ts'
+import { EMPTY, N, matColor, matFlat, matGlow } from '../engine/materials.ts'
 import { P_SHIFT } from '../engine/pressure.ts'
 import { FRAG, VERT } from './shaders.ts'
 
@@ -23,7 +23,11 @@ function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLSh
   gl.shaderSource(sh, src)
   gl.compileShader(sh)
   if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    throw new Error('셰이더 컴파일 실패: ' + gl.getShaderInfoLog(sh))
+    const log = gl.getShaderInfoLog(sh) ?? ''
+    // Print the offending line too — 'ERROR: 0:47' alone is not enough to act on.
+    const line = /ERROR:\s*\d+:(\d+)/.exec(log)
+    const near = line ? `\n  → ${src.split('\n')[+line[1] - 1]?.trim()}` : ''
+    throw new Error('셰이더 컴파일 실패: ' + log + near)
   }
   return sh
 }
@@ -60,7 +64,8 @@ export class Renderer {
     if (!gl.getProgramParameter(this.prog, gl.LINK_STATUS)) {
       throw new Error('셰이더 링크 실패: ' + gl.getProgramInfoLog(this.prog))
     }
-    for (const name of ['uCells', 'uPalette', 'uField', 'uMode', 'uView', 'uLayer', 'uLayers', 'uTilt', 'uGlow']) {
+    for (const name of ['uCells', 'uPalette', 'uField', 'uMode', 'uView', 'uLayer',
+                        'uLayers', 'uTilt', 'uGlow', 'uTexel']) {
       this.u[name] = gl.getUniformLocation(this.prog, name)
     }
 
@@ -92,18 +97,20 @@ export class Renderer {
 
   private makePalette(): WebGLTexture {
     const gl = this.gl
-    const buf = new Uint8Array(256 * 4)
+    // Two rows: colour and glow, then the look flags.
+    const buf = new Uint8Array(256 * 2 * 4)
     for (let i = 0; i < N; i++) {
       const c = matColor[i]
       buf[i * 4] = (c >> 16) & 255
       buf[i * 4 + 1] = (c >> 8) & 255
       buf[i * 4 + 2] = c & 255
       buf[i * 4 + 3] = Math.round(Math.min(1, matGlow[i]) * 255)
+      buf[1024 + i * 4] = matFlat[i] ? 255 : 0
     }
     const tex = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, tex)
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, 256, 1)
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf)
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, 256, 2)
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 2, gl.RGBA, gl.UNSIGNED_BYTE, buf)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
     return tex
@@ -207,6 +214,7 @@ export class Renderer {
     gl.uniform1i(this.u.uLayers!, g.l)
     gl.uniform2f(this.u.uTilt!, opts.tiltX, opts.tiltY)
     gl.uniform1f(this.u.uGlow!, opts.glow)
+    gl.uniform2f(this.u.uTexel!, 1 / g.w, 1 / g.h)
 
     gl.drawArrays(gl.TRIANGLES, 0, 3)
   }

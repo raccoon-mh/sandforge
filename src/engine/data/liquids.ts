@@ -51,7 +51,7 @@ export const LIQUIDS: MatDef[] = [
     density: 1050, disp: 0, tK: 0.1, hcap: 1.6, burn: 0.5, burnT: 560, burnInto: 'ASH', burnHeat: 140,
     lo: 320, loInto: 'PLAS', hard: 0.15,
     desc: '식으면 플라스틱으로 굳는다.' },
-  { id: 'NTRO', name: '니트로글리세린', cat: 'liquid', color: 0xd0c070, cvar: 8, phase: Phase.Liquid,
+  { id: 'NTRO', name: '니트로글리세린', cat: 'explosive', color: 0xd0c070, cvar: 8, phase: Phase.Liquid,
     density: 1590, disp: 3, tK: 0.15, hcap: 1.5, burn: 1, burnT: 320, burnInto: 'SMKE', burnHeat: 1200,
     behav: B.EXPLODE, hard: 0, desc: '건드리면 터진다. 충격에도 터진다.' },
   { id: 'LN2', name: '액체질소', cat: 'liquid', color: 0x9fd8ff, cvar: 6, phase: Phase.Liquid,

@@ -11,6 +11,7 @@ export type ToWorker =
   | { t: 'view'; layer?: number; view?: ViewMode; mode?: ColourMode; tiltX?: number; tiltY?: number; glow?: number }
   | { t: 'probe'; x: number; y: number }
   | { t: 'clear' }
+  | { t: 'scene'; id: string }
   | { t: 'gravity'; value: number }
   | { t: 'save' }
   | { t: 'load'; data: ArrayBuffer }
@@ -32,4 +33,5 @@ export type FromWorker =
   | { t: 'telemetry'; v: Telemetry }
   | { t: 'probe'; x: number; y: number; mat: number; temp: number; pressure: number; charge: number; burning: number }
   | { t: 'saved'; data: ArrayBuffer }
+  | { t: 'scene'; id: string; name: string; hint: string; layer: number; mode: ColourMode }
   | { t: 'error'; message: string }

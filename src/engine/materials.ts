@@ -6,6 +6,11 @@ import { SOLIDS } from './data/solids.ts'
 import { ELECTRONICS } from './data/electronics.ts'
 import { ENERGY } from './data/energy.ts'
 import { LIFE } from './data/life.ts'
+import { METALS } from './data/metals.ts'
+import { CHEMISTRY } from './data/chemistry.ts'
+import { LOGIC } from './data/logic.ts'
+import { EXTRAS } from './data/extras.ts'
+import { EXTRA_REACTIONS } from './data/reactions.ts'
 
 /** Index 0 is empty space (air). Never drawn, never stored in a save. */
 const EMPTY_DEF: MatDef = {
@@ -15,8 +20,17 @@ const EMPTY_DEF: MatDef = {
 
 export const DEFS: MatDef[] = [
   EMPTY_DEF,
-  ...POWDERS, ...LIQUIDS, ...GASES, ...SOLIDS, ...ELECTRONICS, ...ENERGY, ...LIFE,
+  ...POWDERS, ...LIQUIDS, ...GASES, ...SOLIDS, ...METALS, ...ELECTRONICS, ...LOGIC,
+  ...ENERGY, ...LIFE, ...CHEMISTRY, ...EXTRAS,
 ]
+
+// Merge the standalone reaction table into the records before anything reads
+// them, so the compiler below sees one shape and only one.
+for (const [id, rules] of Object.entries(EXTRA_REACTIONS)) {
+  const def = DEFS.find(d => d.id === id)
+  if (!def) throw new Error(`반응표가 없는 물질 '${id}' 를 가리킨다`)
+  def.reacts = [...(def.reacts ?? []), ...rules]
+}
 
 export const N = DEFS.length
 export const EMPTY = 0
@@ -59,6 +73,7 @@ export const matBurn = new Float32Array(N)
 export const matBurnT = new Float32Array(N)
 export const matBurnInto = new Int32Array(N)
 export const matBurnHeat = new Float32Array(N)
+export const matFlameT = new Float32Array(N)
 export const matCond = new Float32Array(N)
 export const matHard = new Float32Array(N)
 export const matLife = new Uint16Array(N)
@@ -66,8 +81,7 @@ export const matBehav = new Int32Array(N)
 export const matGlow = new Float32Array(N)
 export const matDecay = new Uint8Array(N)
 export const matDies = new Int32Array(N)
-/** True when the material has at least one pair reaction — lets the tick skip the table lookup. */
-export const matReactive = new Uint8Array(N)
+export const matGate = new Uint8Array(N)
 
 for (let i = 0; i < N; i++) {
   const d = DEFS[i]
@@ -88,6 +102,7 @@ for (let i = 0; i < N; i++) {
   matBurnT[i] = d.burnT ?? Infinity
   matBurnInto[i] = d.burnInto === undefined ? EMPTY : ref(d.id, d.burnInto)
   matBurnHeat[i] = d.burnHeat ?? 0
+  matFlameT[i] = d.flameT ?? Math.min(4000, (d.burnT ?? 700) + (d.burnHeat ?? 0) * 2)
   matCond[i] = d.cond ?? 0
   matHard[i] = d.hard ?? 0.3
   matLife[i] = d.life ?? 0
@@ -95,56 +110,52 @@ for (let i = 0; i < N; i++) {
   matGlow[i] = d.glow ?? 0
   matDecay[i] = d.decay ? 1 : 0
   matDies[i] = d.dies === undefined ? EMPTY : ref(d.id, d.dies)
+  matGate[i] = d.gate ?? 0
 }
 
 // --- reaction table ----------------------------------------------------------
-// reactAt[a * N + b] is the index of the first rule for the ordered pair (a, b),
-// or -1. Rules for one pair are contiguous. A direct array index beats a hash.
+// Each material's rules sit contiguously and are scanned linearly against the
+// neighbour's id. The obvious alternative — an N x N jump table — is 152KB of
+// random access on the hottest path in the tick, and water alone would miss
+// cache on every probe.
 
-export const reactAt = new Int32Array(N * N).fill(-1)
-export const reactLen = new Uint8Array(N * N)
+export const ruleStart = new Int32Array(N)
+export const ruleCount = new Uint8Array(N)
 
-const rs: number[] = [], ro: number[] = [], rp: number[] = []
+const rw: number[] = [], rs: number[] = [], ro: number[] = [], rp: number[] = []
 const rmin: number[] = [], rmax: number[] = [], rh: number[] = []
 
-{
-  // Group by pair first so each pair's rules land contiguously.
-  const byPair = new Map<number, { self: number; other: number; p: number; minT: number; maxT: number; heat: number }[]>()
-  for (let a = 0; a < N; a++) {
-    for (const r of DEFS[a].reacts ?? []) {
-      const b = ID_TO_NUM.get(r.with)
-      if (b === undefined) throw new Error(`${DEFS[a].id} 의 반응이 없는 물질 '${r.with}' 를 가리킨다`)
-      const key = a * N + b
-      const rule = {
-        self: ref(DEFS[a].id, r.into[0]),
-        other: ref(DEFS[a].id, r.into[1]),
-        p: r.p ?? 1,
-        minT: r.minT ?? -1,
-        maxT: r.maxT ?? Infinity,
-        heat: r.heat ?? 0,
-      }
-      if (rule.p <= 0) continue
-      const list = byPair.get(key)
-      if (list) list.push(rule); else byPair.set(key, [rule])
-    }
+for (let a = 0; a < N; a++) {
+  ruleStart[a] = rw.length
+  let count = 0
+  for (const r of DEFS[a].reacts ?? []) {
+    const b = ID_TO_NUM.get(r.with)
+    if (b === undefined) throw new Error(`${DEFS[a].id} 의 반응이 없는 물질 '${r.with}' 를 가리킨다`)
+    const p = r.p ?? 1
+    if (p <= 0) continue
+    rw.push(b)
+    rs.push(ref(DEFS[a].id, r.into[0]))
+    ro.push(ref(DEFS[a].id, r.into[1]))
+    rp.push(p)
+    rmin.push(r.minT ?? -1)
+    rmax.push(r.maxT ?? Infinity)
+    rh.push(r.heat ?? 0)
+    count++
   }
-  for (const [key, list] of byPair) {
-    reactAt[key] = rs.length
-    reactLen[key] = Math.min(255, list.length)
-    for (const r of list) {
-      rs.push(r.self); ro.push(r.other); rp.push(r.p)
-      rmin.push(r.minT); rmax.push(r.maxT); rh.push(r.heat)
-    }
-    matReactive[(key / N) | 0] = 1
-  }
+  ruleCount[a] = Math.min(255, count)
 }
 
-export const reactSelf = new Int32Array(rs)
-export const reactOther = new Int32Array(ro)
-export const reactP = new Float32Array(rp)
-export const reactMinT = new Float32Array(rmin)
-export const reactMaxT = new Float32Array(rmax)
-export const reactHeat = new Float32Array(rh)
+export const ruleWith = new Int32Array(rw)
+export const ruleSelf = new Int32Array(rs)
+export const ruleOther = new Int32Array(ro)
+export const ruleP = new Float32Array(rp)
+export const ruleMinT = new Float32Array(rmin)
+export const ruleMaxT = new Float32Array(rmax)
+export const ruleHeat = new Float32Array(rh)
+
+/** Skips the scan entirely for the materials that have no rules at all. */
+export const matReactive = new Uint8Array(N)
+for (let i = 0; i < N; i++) matReactive[i] = ruleCount[i] > 0 ? 1 : 0
 
 /**
  * Materials that do something every tick on their own — they must keep their
@@ -155,12 +166,22 @@ export const reactHeat = new Float32Array(rh)
 const SELF_DRIVEN =
   B.CLONE | B.VOID | B.HEATER | B.COOLER | B.RADIO | B.GROW | B.INFECT |
   B.ABSORB | B.CORRODE | B.PUMP | B.VENT | B.CLOCK | B.SENSOR | B.BATTERY |
-  B.ANTIM | B.PHOTON | B.NEUTRON | B.SPARK
+  B.ANTIM | B.PHOTON | B.NEUTRON | B.SPARK | B.GATE | B.MAGNET
 
 export const matSelfActive = new Uint8Array(N)
 for (let i = 0; i < N; i++) {
   matSelfActive[i] =
     matDecay[i] || matPhase[i] === Phase.Energy || (matBehav[i] & SELF_DRIVEN) !== 0 ? 1 : 0
+}
+
+/**
+ * Manufactured solids are drawn flat with a bevelled edge; natural ones keep
+ * their grain. Without this a copper bus and a heap of sand look the same, and
+ * a circuit reads as a smear of powder.
+ */
+export const matFlat = new Uint8Array(N)
+for (let i = 0; i < N; i++) {
+  matFlat[i] = matPhase[i] === Phase.Solid && matCvar[i] < 10 ? 1 : 0
 }
 
 /** Fire-likes ignite what they touch without a table entry. */
