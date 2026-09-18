@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>SANDFORGE — 웹 입자 물리 실험실</title>
+<meta name="description" content="브라우저에서 도는 입자 단위 물리 실험실. 138가지 물질, 열·압력·전기·화학이 한 격자 위에서 동시에 돈다.">
+<meta name="theme-color" content="#0b0c0f">
+<meta property="og:title" content="SANDFORGE">
+<meta property="og:description" content="웹 입자 물리 실험실 — 138가지 물질, 깊이 레이어, 계측 장비.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230b0c0f'/><circle cx='11' cy='20' r='4' fill='%23d6ad6a'/><circle cx='20' cy='13' r='4' fill='%23e05a10'/><circle cx='21' cy='22' r='3' fill='%232f6fd0'/></svg>">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand"><b>SANDFORGE</b><span class="sub">입자 물리 실험실</span></div>
+
+    <div class="group">
+      <button id="playBtn" class="icon" title="재생 / 일시정지 (Space)">⏸</button>
+      <button id="stepBtn" class="icon" title="한 틱 진행 (F)">⏭</button>
+      <label class="slider" title="시뮬레이션 배속">
+        <span id="speedLabel">1.0×</span>
+        <input id="speed" type="range" min="0" max="7" step="1" value="3">
+      </label>
+    </div>
+
+    <div class="group" id="viewGroup" role="radiogroup" aria-label="시점">
+      <button data-view="slice" class="on">단면</button>
+      <button data-view="stack">겹쳐보기</button>
+      <button data-view="tilt">기울여보기</button>
+    </div>
+
+    <div class="group" id="modeGroup" role="radiogroup" aria-label="표시">
+      <button data-mode="material" class="on">물질</button>
+      <button data-mode="thermal">열화상</button>
+      <button data-mode="pressure">압력</button>
+      <button data-mode="circuit">회로</button>
+    </div>
+
+    <div class="group layer" title="깊이 레이어 (Q / E)">
+      <button id="layerDown" class="icon">−</button>
+      <span id="layerLabel">층 1/8</span>
+      <button id="layerUp" class="icon">+</button>
+    </div>
+
+    <div class="group right">
+      <button id="saveBtn">저장</button>
+      <button id="loadBtn">열기</button>
+      <button id="clearBtn" class="danger">비우기</button>
+      <button id="paletteBtn" class="only-narrow">재료</button>
+    </div>
+  </header>
+
+  <main id="stage">
+    <canvas id="view"></canvas>
+    <div id="brushRing" aria-hidden="true"></div>
+  </main>
+
+  <aside id="palette" aria-label="재료 팔레트">
+    <div class="pal-head">
+      <input id="search" type="search" placeholder="재료 검색 (이름 · 코드 · 설명)" autocomplete="off">
+      <button id="palClose" class="icon only-narrow">✕</button>
+    </div>
+    <div class="brushrow">
+      <label>붓 크기<input id="brush" type="range" min="1" max="40" value="6"></label>
+      <output id="brushOut">6</output>
+    </div>
+    <div id="palList"></div>
+    <div id="matInfo" hidden></div>
+  </aside>
+
+  <footer id="statusbar">
+    <div id="probe" class="probe">격자 위에 마우스를 올리면 그 칸의 상태가 여기 나옵니다</div>
+    <div id="perf" class="perf"></div>
+  </footer>
+</div>
+
+<div id="recent" aria-label="최근 재료"></div>
+<input id="fileInput" type="file" accept=".sfg,application/octet-stream" hidden>
+<div id="toast" hidden></div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
