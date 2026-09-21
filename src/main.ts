@@ -138,7 +138,7 @@ function buildPalette(filter = ''): void {
       b.innerHTML = `<span class="swatch" style="background:${hex(matColor[n])}"></span><span class="nm">${d.name}</span>`
       b.onclick = () => pick(n)
       b.onpointerenter = () => peekInfo(n, b)
-      b.onpointerleave = () => $('palette').classList.remove('peek')
+      b.onpointerleave = endPeek
       grid.append(b)
     }
     list.append(grid)
@@ -174,6 +174,16 @@ function peekInfo(n: number, el: HTMLElement): void {
   box.style.top = lower ? `${list.offsetTop}px` : ''
   box.style.bottom = lower ? 'auto' : ''
   $('palette').classList.add('peek')
+}
+
+/** Hover over: fall back to the picked material, docked at the bottom. */
+function endPeek(): void {
+  const pal = $('palette')
+  pal.classList.remove('peek')
+  if (!pal.classList.contains('pinned')) return
+  showInfo(current)
+  const box = $('matInfo')
+  box.style.top = box.style.bottom = ''
 }
 
 function showInfo(n: number): void {
@@ -255,6 +265,7 @@ function pick(n: number): void {
   if (recent.length > 8) recent.length = 8
   renderRecent()
   showInfo(n)
+  $('palette').classList.add('pinned')
   for (const el of document.querySelectorAll<HTMLElement>('.mat')) {
     el.classList.toggle('on', el.dataset.mat === String(n))
   }

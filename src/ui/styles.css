@@ -122,8 +122,9 @@ input[type=range] { width: 92px; accent-color: var(--accent); }
 .mat:hover { border-color: var(--accent); }
 
 /* Laid over the list instead of sharing its column, so the list keeps the full
-   height no matter how long the hovered material's info is. Shown only while a
-   material is hovered, on the half of the list away from it (see peekInfo). */
+   height no matter how long the hovered material's info is. Shown while a
+   material is hovered, on the half of the list away from it (see peekInfo),
+   and otherwise for the picked material once there is one. */
 #matInfo {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
   background: var(--panel); box-shadow: 0 0 20px #0007;
@@ -131,7 +132,7 @@ input[type=range] { width: 92px; accent-color: var(--accent); }
   padding: 9px 11px; color: var(--dim); pointer-events: none;
   font-size: 12px; max-height: 46%; overflow-y: auto;
 }
-#palette:not(.peek) #matInfo { display: none; }
+#palette:not(.peek):not(.pinned) #matInfo { display: none; }
 #matInfo h4 { margin: 0 0 4px; color: var(--ink); font-size: 13px; }
 #matInfo .code { color: #6f7684; font-weight: 400; font-size: 11px; }
 #matInfo .blurb { margin-bottom: 2px; }
@@ -225,7 +226,7 @@ button.accent:hover { background: #35485c; }
   }
   #palette.open { transform: none; }
   /* Touch has no hover: keep the info in the column, always shown. */
-  #matInfo, #palette:not(.peek) #matInfo {
+  #matInfo, #palette:not(.peek):not(.pinned) #matInfo {
     position: static; display: block; box-shadow: none; border-bottom: 0;
     pointer-events: auto;
   }
