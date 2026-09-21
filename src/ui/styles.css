@@ -95,7 +95,6 @@ input[type=range] { width: 92px; accent-color: var(--accent); }
 #palette {
   grid-area: pal; background: var(--panel); border-left: 1px solid var(--line);
   display: flex; flex-direction: column; min-height: 0; position: relative;
-  --info-h: calc((100vh - var(--top) - var(--bottom)) * .46);
 }
 .pal-head { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--line); }
 #search {
@@ -122,17 +121,17 @@ input[type=range] { width: 92px; accent-color: var(--accent); }
 .mat.on { border-color: var(--ink); }
 .mat:hover { border-color: var(--accent); }
 
-/* Laid over the bottom of the palette instead of sharing its column, so the
-   list keeps the full height no matter how long the hovered material's info
-   is. The list gets matching bottom padding so its last row can scroll clear. */
-#palette:hover #palList { padding-bottom: calc(var(--info-h) + 6px); }
+/* Laid over the list instead of sharing its column, so the list keeps the full
+   height no matter how long the hovered material's info is. Shown only while a
+   material is hovered, on the half of the list away from it (see peekInfo). */
 #matInfo {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
-  background: var(--panel); box-shadow: 0 -8px 20px #0007;
-  border-top: 1px solid var(--line); padding: 9px 11px; color: var(--dim);
-  font-size: 12px; max-height: var(--info-h); overflow-y: auto;
+  background: var(--panel); box-shadow: 0 0 20px #0007;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  padding: 9px 11px; color: var(--dim); pointer-events: none;
+  font-size: 12px; max-height: 46%; overflow-y: auto;
 }
-#palette:not(:hover) #matInfo { display: none; }
+#palette:not(.peek) #matInfo { display: none; }
 #matInfo h4 { margin: 0 0 4px; color: var(--ink); font-size: 13px; }
 #matInfo .code { color: #6f7684; font-weight: 400; font-size: 11px; }
 #matInfo .blurb { margin-bottom: 2px; }
@@ -226,11 +225,11 @@ button.accent:hover { background: #35485c; }
   }
   #palette.open { transform: none; }
   /* Touch has no hover: keep the info in the column, always shown. */
-  #matInfo, #palette:not(:hover) #matInfo {
-    position: static; display: block; max-height: 46%; box-shadow: none;
+  #matInfo, #palette:not(.peek) #matInfo {
+    position: static; display: block; box-shadow: none; border-bottom: 0;
+    pointer-events: auto;
   }
   #matInfo[hidden] { display: none; }
-  #palette:hover #palList { padding-bottom: 6px; }
   .only-narrow { display: inline-block; }
   #topbar { gap: 8px; }
   .brand .sub { display: none; }

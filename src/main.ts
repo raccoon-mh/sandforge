@@ -137,7 +137,8 @@ function buildPalette(filter = ''): void {
       b.title = `${d.name} (${d.id})`
       b.innerHTML = `<span class="swatch" style="background:${hex(matColor[n])}"></span><span class="nm">${d.name}</span>`
       b.onclick = () => pick(n)
-      b.onpointerenter = () => showInfo(n)
+      b.onpointerenter = () => peekInfo(n, b)
+      b.onpointerleave = () => $('palette').classList.remove('peek')
       grid.append(b)
     }
     list.append(grid)
@@ -157,6 +158,23 @@ const BEHAVIOUR_NAMES: [number, string][] = [
 const matName = (id: string): string => DEFS[ID_TO_NUM.get(id)!]?.name ?? id
 const sideName = (v: string | null, fallback: string): string =>
   v === null ? fallback : v === '' ? '소멸' : matName(v)
+
+/**
+ * Hover preview. The info panel floats over the list, so it goes on the half
+ * away from the hovered button — otherwise it would cover the button, fire
+ * pointerleave and flicker.
+ */
+function peekInfo(n: number, el: HTMLElement): void {
+  showInfo(n)
+  const list = $('palList')
+  const box = $('matInfo')
+  const l = list.getBoundingClientRect()
+  const r = el.getBoundingClientRect()
+  const lower = r.top + r.height / 2 > l.top + l.height / 2
+  box.style.top = lower ? `${list.offsetTop}px` : ''
+  box.style.bottom = lower ? 'auto' : ''
+  $('palette').classList.add('peek')
+}
 
 function showInfo(n: number): void {
   const d = DEFS[n]
