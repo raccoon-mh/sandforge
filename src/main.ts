@@ -137,7 +137,8 @@ function buildPalette(filter = ''): void {
       b.title = `${d.name} (${d.id})`
       b.innerHTML = `<span class="swatch" style="background:${hex(matColor[n])}"></span><span class="nm">${d.name}</span>`
       b.onclick = () => pick(n)
-      b.onpointerenter = () => showInfo(n)
+      b.onpointerenter = () => peekInfo(n, b)
+      b.onpointerleave = endPeek
       grid.append(b)
     }
     list.append(grid)
@@ -157,6 +158,33 @@ const BEHAVIOUR_NAMES: [number, string][] = [
 const matName = (id: string): string => DEFS[ID_TO_NUM.get(id)!]?.name ?? id
 const sideName = (v: string | null, fallback: string): string =>
   v === null ? fallback : v === '' ? '소멸' : matName(v)
+
+/**
+ * Hover preview. The info panel floats over the list, so it goes on the half
+ * away from the hovered button — otherwise it would cover the button, fire
+ * pointerleave and flicker.
+ */
+function peekInfo(n: number, el: HTMLElement): void {
+  showInfo(n)
+  const list = $('palList')
+  const box = $('matInfo')
+  const l = list.getBoundingClientRect()
+  const r = el.getBoundingClientRect()
+  const lower = r.top + r.height / 2 > l.top + l.height / 2
+  box.style.top = lower ? `${list.offsetTop}px` : ''
+  box.style.bottom = lower ? 'auto' : ''
+  $('palette').classList.add('peek')
+}
+
+/** Hover over: fall back to the picked material, docked at the bottom. */
+function endPeek(): void {
+  const pal = $('palette')
+  pal.classList.remove('peek')
+  if (!pal.classList.contains('pinned')) return
+  showInfo(current)
+  const box = $('matInfo')
+  box.style.top = box.style.bottom = ''
+}
 
 function showInfo(n: number): void {
   const d = DEFS[n]
@@ -237,6 +265,7 @@ function pick(n: number): void {
   if (recent.length > 8) recent.length = 8
   renderRecent()
   showInfo(n)
+  $('palette').classList.add('pinned')
   for (const el of document.querySelectorAll<HTMLElement>('.mat')) {
     el.classList.toggle('on', el.dataset.mat === String(n))
   }
